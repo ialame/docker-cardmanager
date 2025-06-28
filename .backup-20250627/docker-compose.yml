@@ -1,0 +1,99 @@
+services:
+  # Base de données MariaDB
+  mariadb:
+    image: mariadb:11.2
+    container_name: mariadb-dev
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: dev
+      MYSQL_USER: ia
+      MYSQL_PASSWORD: foufafou
+    ports:
+      - "3308:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Service Mason (bibliothèque commune)
+  mason:
+    build:
+      context: .
+      dockerfile: docker/mason/Dockerfile
+    container_name: mason-service
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb:3306/dev
+      - SPRING_DATASOURCE_USERNAME=ia
+      - SPRING_DATASOURCE_PASSWORD=foufafou
+      - SPRING_PROFILES_ACTIVE=docker
+    networks:
+      - app-network
+
+  # Service Painter (gestion d'images)
+  painter:
+    build:
+      context: .
+      dockerfile: docker/painter/Dockerfile
+    container_name: painter-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      mason:
+        condition: service_started
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb:3306/dev
+      - SPRING_DATASOURCE_USERNAME=ia
+      - SPRING_DATASOURCE_PASSWORD=foufafou
+      - SPRING_PROFILES_ACTIVE=docker
+      - PAINTER_IMAGE_STORAGE_PATH=/app/images
+    volumes:
+      - painter_images:/app/images
+    networks:
+      - app-network
+
+  # Service Gestion Carte (application principale)
+
+  gestioncarte:
+    build:
+      context: .
+      dockerfile: docker/gestioncarte/Dockerfile
+    container_name: gestioncarte-service
+    ports:
+      - "8080:8080"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      painter:
+        condition: service_started
+      mason:
+        condition: service_started
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb:3306/dev
+      - SPRING_DATASOURCE_USERNAME=ia
+      - SPRING_DATASOURCE_PASSWORD=foufafou
+      - SPRING_PROFILES_ACTIVE=docker
+      - PAINTER_SERVICE_URL=http://painter:8081
+      - SPRING_LIQUIBASE_ENABLED=true
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=none
+    networks:
+      - app-network
+
+volumes:
+  mariadb_data:
+  painter_images:
+
+networks:
+  app-network:
+    driver: bridge
