@@ -1,64 +1,150 @@
-# SOLUTION 1: Volume Docker partagé (Recommandé)
-# Modifiez docker-compose.yml
-
+# 🐳 Docker Compose avec Support SSH/HTTPS
 version: '3.8'
 
 services:
+  # 🗄️ Base de données MariaDB (optionnelle pour le développement)
+  mariadb:
+    image: mariadb:10.11
+    container_name: cardmanager-mariadb-dev
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${DB_NAME:-dev}
+      MYSQL_USER: ${DB_USER:-ia}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-foufafou}
+    ports:
+      - "${MARIADB_PORT:-3307}:3306"
+    volumes:
+      - cardmanager_db_data:/var/lib/mysql
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    networks:
+      - cardmanager-network
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # 🔧 Service Mason (Bibliothèque commune)
+  mason:
+    build:
+      context: ./docker/mason
+      args:
+        MASON_REPO_URL: ${MASON_REPO_URL:-https://github.com/ialame/mason.git}
+        MASON_BRANCH: ${MASON_BRANCH:-main}
+        GIT_TOKEN: ${GIT_TOKEN:-}
+        SSH_PRIVATE_KEY: ${SSH_PRIVATE_KEY:-}
+    container_name: cardmanager-mason
+    networks:
+      - cardmanager-network
+    profiles:
+      - build
+
+  # 🎨 Service Painter (Gestion d'images)
   painter:
     build:
-      context: .
-      dockerfile: docker/painter/Dockerfile
+      context: ./docker/painter
+      args:
+        # ✅ Support SSH et HTTPS
+        MASON_REPO_URL: ${MASON_REPO_URL:-https://github.com/ialame/mason.git}
+        PAINTER_REPO_URL: ${PAINTER_REPO_URL:-https://github.com/ialame/painter.git}
+        MASON_BRANCH: ${MASON_BRANCH:-main}
+        PAINTER_BRANCH: ${PAINTER_BRANCH:-main}
+        GIT_TOKEN: ${GIT_TOKEN:-}
+        SSH_PRIVATE_KEY: ${SSH_PRIVATE_KEY:-}
     container_name: cardmanager-painter
     ports:
-      - "8081:8081"
-    volumes:
-      - cardmanager_images:/app/images  # ← Volume pour persister les images
+      - "${PAINTER_PORT:-8081}:8080"
     environment:
-      - JAVA_OPTS=-Xmx1024m -Xms512m
-      - PAINTER_IMAGE_STORAGE_PATH=/app/images
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb:3306/${DB_NAME:-dev}
+      - SPRING_DATASOURCE_USERNAME=${DB_USER:-ia}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-foufafou}
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - LOGGING_LEVEL_COM_PCAGRADE=DEBUG
+    volumes:
+      - cardmanager_images:/app/images
     networks:
       - cardmanager-network
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
+  # 💳 Service GestionCarte (Application principale)
   gestioncarte:
     build:
-      context: .
-      dockerfile: docker/gestioncarte/Dockerfile
+      context: ./docker/gestioncarte
+      args:
+        # ✅ Support SSH et HTTPS
+        MASON_REPO_URL: ${MASON_REPO_URL:-https://github.com/ialame/mason.git}
+        PAINTER_REPO_URL: ${PAINTER_REPO_URL:-https://github.com/ialame/painter.git}
+        GESTIONCARTE_REPO_URL: ${GESTIONCARTE_REPO_URL:-https://github.com/ialame/gestioncarte.git}
+        MASON_BRANCH: ${MASON_BRANCH:-main}
+        PAINTER_BRANCH: ${PAINTER_BRANCH:-main}
+        GESTIONCARTE_BRANCH: ${GESTIONCARTE_BRANCH:-main}
+        GIT_TOKEN: ${GIT_TOKEN:-}
+        SSH_PRIVATE_KEY: ${SSH_PRIVATE_KEY:-}
     container_name: cardmanager-gestioncarte
     ports:
-      - "8080:8080"
-    depends_on:
-      painter:
-        condition: service_started
+      - "${GESTIONCARTE_PORT:-8080}:8080"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb-standalone:3306/dev
-      - SPRING_DATASOURCE_USERNAME=ia
-      - SPRING_DATASOURCE_PASSWORD=foufafou
       - SPRING_PROFILES_ACTIVE=docker
-      - PAINTER_SERVICE_URL=http://painter:8081
-      - PAINTER_BASE_URL=http://painter:8081
-      - PAINTER_PUBLIC_URL=http://painter:8081
+      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb:3306/${DB_NAME:-dev}
+      - SPRING_DATASOURCE_USERNAME=${DB_USER:-ia}
+      - SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD:-foufafou}
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - PAINTER_SERVICE_URL=http://painter:8080
+      - LOGGING_LEVEL_COM_PCAGRADE=DEBUG
     networks:
       - cardmanager-network
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      painter:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
 
-  # Serveur web statique pour servir les images
-  nginx-images:
+  # ⚡ Serveur Nginx pour images statiques (haute performance)
+  nginx:
     image: nginx:alpine
-    container_name: cardmanager-images-server
+    container_name: cardmanager-nginx
     ports:
-      - "8082:80"  # ← Port pour accéder aux images
+      - "${NGINX_PORT:-8082}:80"
     volumes:
-      - cardmanager_images:/usr/share/nginx/html/images:ro  # ← Lecture seule
-      - ./nginx-images.conf:/etc/nginx/conf.d/default.conf
+      - cardmanager_images:/usr/share/nginx/html/images:ro
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - cardmanager-network
     depends_on:
       - painter
-    networks:
-      - cardmanager-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
+# 💾 Volumes persistants
 volumes:
+  cardmanager_db_data:
+    driver: local
+    name: cardmanager_db_data
   cardmanager_images:
+    driver: local
     name: cardmanager_images
 
+# 🔗 Réseau isolé
 networks:
   cardmanager-network:
-    name: cardmanager-network
     driver: bridge
+    name: cardmanager-network

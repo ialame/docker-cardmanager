@@ -1,13 +1,41 @@
+# 🎨 Dockerfile Painter Complet avec Support SSH
 FROM maven:3.9.6-eclipse-temurin-21 AS builder
 WORKDIR /usr/src/app
 
+# Installer git, ssh et curl
+RUN apt-get update && \
+    apt-get install -y git openssh-client curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Arguments pour Git (passés depuis docker-compose.yml)
 ARG MASON_REPO_URL
 ARG PAINTER_REPO_URL
 ARG MASON_BRANCH=main
 ARG PAINTER_BRANCH=main
 ARG GIT_TOKEN
+ARG SSH_PRIVATE_KEY
 
-# Créer le POM parent complet avec toutes les dépendances Mason
+# ✅ Configuration SSH pour Bitbucket
+RUN mkdir -p ~/.ssh && \
+    chmod 700 ~/.ssh && \
+    ssh-keyscan -H bitbucket.org >> ~/.ssh/known_hosts && \
+    ssh-keyscan -H github.com >> ~/.ssh/known_hosts
+
+# Ajouter la clé SSH privée si fournie
+RUN if [ ! -z "$SSH_PRIVATE_KEY" ]; then \
+        echo "$SSH_PRIVATE_KEY" | base64 -d > ~/.ssh/id_rsa && \
+        chmod 600 ~/.ssh/id_rsa && \
+        echo "✅ SSH key configured"; \
+    else \
+        echo "⚠️ No SSH key provided"; \
+    fi
+
+# Configuration Git globale
+RUN git config --global user.email "docker@cardmanager.local" && \
+    git config --global user.name "Docker Builder" && \
+    git config --global init.defaultBranch main
+
+# Créer le POM parent avec toutes les dépendances
 RUN echo '<?xml version="1.0" encoding="UTF-8"?>' > pom.xml && \
     echo '<project xmlns="http://maven.apache.org/POM/4.0.0"' >> pom.xml && \
     echo '         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"' >> pom.xml && \
@@ -30,6 +58,7 @@ RUN echo '<?xml version="1.0" encoding="UTF-8"?>' > pom.xml && \
     echo '        <mason.version>2.4.1</mason.version>' >> pom.xml && \
     echo '        <painter.version>1.3.0</painter.version>' >> pom.xml && \
     echo '        <swagger.version>2.2.21</swagger.version>' >> pom.xml && \
+    echo '        <springdoc.version>2.2.0</springdoc.version>' >> pom.xml && \
     echo '        <resilience4j.version>2.1.0</resilience4j.version>' >> pom.xml && \
     echo '        <mapstruct.version>1.5.5.Final</mapstruct.version>' >> pom.xml && \
     echo '    </properties>' >> pom.xml && \
@@ -66,36 +95,22 @@ RUN echo '<?xml version="1.0" encoding="UTF-8"?>' > pom.xml && \
     echo '                <artifactId>mason-localization</artifactId>' >> pom.xml && \
     echo '                <version>${mason.version}</version>' >> pom.xml && \
     echo '            </dependency>' >> pom.xml && \
+    echo '            <!-- Painter Dependencies -->' >> pom.xml && \
     echo '            <dependency>' >> pom.xml && \
-    echo '                <groupId>com.pcagrade.mason</groupId>' >> pom.xml && \
-    echo '                <artifactId>mason-json</artifactId>' >> pom.xml && \
-    echo '                <version>${mason.version}</version>' >> pom.xml && \
+    echo '                <groupId>com.pcagrade.painter</groupId>' >> pom.xml && \
+    echo '                <artifactId>painter-common</artifactId>' >> pom.xml && \
+    echo '                <version>${painter.version}</version>' >> pom.xml && \
     echo '            </dependency>' >> pom.xml && \
     echo '            <dependency>' >> pom.xml && \
-    echo '                <groupId>com.pcagrade.mason</groupId>' >> pom.xml && \
-    echo '                <artifactId>mason-oauth2</artifactId>' >> pom.xml && \
-    echo '                <version>${mason.version}</version>' >> pom.xml && \
+    echo '                <groupId>com.pcagrade.painter</groupId>' >> pom.xml && \
+    echo '                <artifactId>painter-client</artifactId>' >> pom.xml && \
+    echo '                <version>${painter.version}</version>' >> pom.xml && \
     echo '            </dependency>' >> pom.xml && \
+    echo '            <!-- Spring Boot et autres dependencies -->' >> pom.xml && \
     echo '            <dependency>' >> pom.xml && \
-    echo '                <groupId>com.pcagrade.mason</groupId>' >> pom.xml && \
-    echo '                <artifactId>mason-transaction-author</artifactId>' >> pom.xml && \
-    echo '                <version>${mason.version}</version>' >> pom.xml && \
-    echo '            </dependency>' >> pom.xml && \
-    echo '            <dependency>' >> pom.xml && \
-    echo '                <groupId>com.pcagrade.mason</groupId>' >> pom.xml && \
-    echo '                <artifactId>mason-web-client</artifactId>' >> pom.xml && \
-    echo '                <version>${mason.version}</version>' >> pom.xml && \
-    echo '            </dependency>' >> pom.xml && \
-    echo '            <dependency>' >> pom.xml && \
-    echo '                <groupId>com.pcagrade.mason</groupId>' >> pom.xml && \
-    echo '                <artifactId>mason-test</artifactId>' >> pom.xml && \
-    echo '                <version>${mason.version}</version>' >> pom.xml && \
-    echo '            </dependency>' >> pom.xml && \
-    echo '            <!-- Third Party Dependencies -->' >> pom.xml && \
-    echo '            <dependency>' >> pom.xml && \
-    echo '                <groupId>io.swagger.core.v3</groupId>' >> pom.xml && \
-    echo '                <artifactId>swagger-annotations</artifactId>' >> pom.xml && \
-    echo '                <version>${swagger.version}</version>' >> pom.xml && \
+    echo '                <groupId>org.springdoc</groupId>' >> pom.xml && \
+    echo '                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>' >> pom.xml && \
+    echo '                <version>${springdoc.version}</version>' >> pom.xml && \
     echo '            </dependency>' >> pom.xml && \
     echo '            <dependency>' >> pom.xml && \
     echo '                <groupId>io.github.resilience4j</groupId>' >> pom.xml && \
@@ -114,39 +129,112 @@ RUN echo '<?xml version="1.0" encoding="UTF-8"?>' > pom.xml && \
 # Installer le POM parent
 RUN mvn install -N
 
-# Script de clonage Git
-RUN echo '#!/bin/bash' > /usr/local/bin/git-clone.sh && \
-    echo 'REPO_URL=$1' >> /usr/local/bin/git-clone.sh && \
-    echo 'TARGET_DIR=$2' >> /usr/local/bin/git-clone.sh && \
-    echo 'BRANCH=$3' >> /usr/local/bin/git-clone.sh && \
-    echo 'TOKEN=$4' >> /usr/local/bin/git-clone.sh && \
-    echo 'if [ -n "$TOKEN" ]; then' >> /usr/local/bin/git-clone.sh && \
-    echo '  AUTH_URL=$(echo $REPO_URL | sed "s|https://|https://$TOKEN@|")' >> /usr/local/bin/git-clone.sh && \
-    echo 'else' >> /usr/local/bin/git-clone.sh && \
-    echo '  AUTH_URL=$REPO_URL' >> /usr/local/bin/git-clone.sh && \
-    echo 'fi' >> /usr/local/bin/git-clone.sh && \
-    echo 'git clone --depth 1 --branch $BRANCH $AUTH_URL $TARGET_DIR' >> /usr/local/bin/git-clone.sh && \
-    chmod +x /usr/local/bin/git-clone.sh
+# ✅ Script de clonage intelligent SSH/HTTPS
+RUN echo '#!/bin/bash' > /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'set -e' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'REPO_URL="$1"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'TARGET_DIR="$2"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'BRANCH="$3"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'TOKEN="$4"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "=== Enhanced Git Clone ==="' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "Repository: $REPO_URL"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "Target: $TARGET_DIR"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "Branch: $BRANCH"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '# Détecter le type d URL (SSH vs HTTPS)' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'if [[ "$REPO_URL" == git@* ]]; then' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    echo "✅ SSH URL detected"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    AUTH_URL="$REPO_URL"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    # Test SSH key' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    if [ -f ~/.ssh/id_rsa ]; then' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '        echo "🔑 SSH key found"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    else' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '        echo "❌ No SSH key found"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '        exit 1' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    fi' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'elif [[ "$REPO_URL" == *":"*"@"* ]]; then' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    echo "✅ HTTPS with credentials detected"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    AUTH_URL="$REPO_URL"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'elif [[ "$REPO_URL" == *"@"* ]]; then' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    echo "⚠️ HTTPS with username but no password"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    AUTH_URL="$REPO_URL"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'elif [ -n "$TOKEN" ]; then' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    echo "✅ Adding token to HTTPS URL"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    AUTH_URL=$(echo "$REPO_URL" | sed "s|https://|https://x-token-auth:$TOKEN@|")' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'else' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    echo "✅ Public repository"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    AUTH_URL="$REPO_URL"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'fi' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "🚀 Cloning with: $(echo "$AUTH_URL" | sed "s/@[^@]*@/@***@/; s|://[^@]*@|://***@|")"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '# Clone avec gestion d erreurs et retry' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'for attempt in 1 2 3; do' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    echo "Attempt $attempt/3..."' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    if git clone --depth 1 --branch "$BRANCH" "$AUTH_URL" "$TARGET_DIR"; then' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '        echo "✅ Successfully cloned $TARGET_DIR"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '        exit 0' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    else' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '        echo "❌ Attempt $attempt failed"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '        sleep 2' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    fi' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'done' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "❌ Failed to clone $REPO_URL after 3 attempts"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo ""' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "🔍 Troubleshooting:"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "1️⃣ Check repository URL: $REPO_URL"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "2️⃣ Check branch exists: $BRANCH"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "3️⃣ Check authentication (SSH key or token)"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'echo "4️⃣ Check repository permissions"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'if [[ "$REPO_URL" == git@* ]]; then' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo '    echo "5️⃣ SSH Debug: ssh -T git@bitbucket.org"' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'fi' >> /usr/local/bin/git-clone-enhanced.sh && \
+    echo 'exit 1' >> /usr/local/bin/git-clone-enhanced.sh && \
+    chmod +x /usr/local/bin/git-clone-enhanced.sh
 
-# Cloner les dépôts
-RUN /usr/local/bin/git-clone.sh "$MASON_REPO_URL" mason "$MASON_BRANCH" "$GIT_TOKEN"
-RUN /usr/local/bin/git-clone.sh "$PAINTER_REPO_URL" painter "$PAINTER_BRANCH" "$GIT_TOKEN"
+# ✅ Cloner les dépôts avec le script enhanced (supporte SSH et HTTPS)
+RUN /usr/local/bin/git-clone-enhanced.sh "$MASON_REPO_URL" mason "$MASON_BRANCH" "$GIT_TOKEN"
+RUN /usr/local/bin/git-clone-enhanced.sh "$PAINTER_REPO_URL" painter "$PAINTER_BRANCH" "$GIT_TOKEN"
 
-# Build Mason
+# Build Mason en premier (dépendance)
 WORKDIR /usr/src/app/mason
-RUN mvn clean install -DskipTests
+RUN echo "🔨 Building Mason..." && \
+    mvn clean install -DskipTests -q
 
 # Build Painter
 WORKDIR /usr/src/app/painter
-RUN mvn clean package -DskipTests
+RUN echo "🎨 Building Painter..." && \
+    mvn clean package -DskipTests -q
 
-# Image finale
+# ========================================
+# Image finale optimisée
+# ========================================
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
+
+# Installer curl pour health checks
 RUN apk add --no-cache curl
+
+# Copier le JAR Painter depuis le builder
 COPY --from=builder /usr/src/app/painter/painter/target/painter-*.jar app.jar
-RUN mkdir -p /app/images
-ENV JAVA_OPTS="-Xmx1024m -Xms512m"
+
+# Créer le répertoire d'images
+RUN mkdir -p /app/images && \
+    chmod 755 /app/images
+
+# Variables d'environnement optimisées
+ENV JAVA_OPTS="-Xmx1024m -Xms512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 ENV PAINTER_IMAGE_STORAGE_PATH="/app/images"
-EXPOSE 8081
+ENV SPRING_PROFILES_ACTIVE=docker
+
+# Port d'exposition
+EXPOSE 8080
+
+# Health check optimisé
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# Point d'entrée optimisé
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
