@@ -1,104 +1,33 @@
+# SOLUTION 1: Volume Docker partagé (Recommandé)
+# Modifiez docker-compose.yml
+
+version: '3.8'
+
 services:
-  # Base de données MariaDB standalone
-  mariadb-standalone:
-    image: mariadb:11.2
-    container_name: cardmanager-mariadb-dev
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: dev
-      MYSQL_USER: ia
-      MYSQL_PASSWORD: foufafou
-    ports:
-      - "3307:3306"
-    volumes:
-      - cardmanager_db_data:/var/lib/mysql
-      - ./init-db:/docker-entrypoint-initdb.d
-    networks:
-      - cardmanager-network
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      start_period: 60s
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-
-  # Service Mason
-  mason:
-    build:
-      context: .
-      dockerfile: docker/mason/Dockerfile
-      args:
-        # Variables Git configurables (GitHub/Bitbucket)
-        MASON_REPO_URL: ${MASON_REPO_URL:-https://github.com/ialame/mason.git}
-        MASON_BRANCH: ${MASON_BRANCH:-main}
-        GIT_TOKEN: ${GIT_TOKEN:-}
-    container_name: cardmanager-mason
-    depends_on:
-      mariadb-standalone:
-        condition: service_healthy
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb-standalone:3306/dev
-      - SPRING_DATASOURCE_USERNAME=ia
-      - SPRING_DATASOURCE_PASSWORD=foufafou
-      - SPRING_PROFILES_ACTIVE=docker
-    networks:
-      - cardmanager-network
-
-  # Service Painter
   painter:
     build:
       context: .
       dockerfile: docker/painter/Dockerfile
-      args:
-        # Variables Git configurables (GitHub/Bitbucket)
-        MASON_REPO_URL: ${MASON_REPO_URL:-https://github.com/ialame/mason.git}
-        PAINTER_REPO_URL: ${PAINTER_REPO_URL:-https://github.com/ialame/painter.git}
-        MASON_BRANCH: ${MASON_BRANCH:-main}
-        PAINTER_BRANCH: ${PAINTER_BRANCH:-main}
-        GIT_TOKEN: ${GIT_TOKEN:-}
     container_name: cardmanager-painter
     ports:
       - "8081:8081"
-    depends_on:
-      mariadb-standalone:
-        condition: service_healthy
-      mason:
-        condition: service_started
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb-standalone:3306/dev
-      - SPRING_DATASOURCE_USERNAME=ia
-      - SPRING_DATASOURCE_PASSWORD=foufafou
-      - SPRING_PROFILES_ACTIVE=docker
-      - PAINTER_IMAGE_STORAGE_PATH=/app/images
     volumes:
-      - cardmanager_images:/app/images
+      - cardmanager_images:/app/images  # ← Volume pour persister les images
+    environment:
+      - JAVA_OPTS=-Xmx1024m -Xms512m
+      - PAINTER_IMAGE_STORAGE_PATH=/app/images
     networks:
       - cardmanager-network
 
-  # Service GestionCarte
   gestioncarte:
     build:
       context: .
       dockerfile: docker/gestioncarte/Dockerfile
-      args:
-        # Variables Git configurables (GitHub/Bitbucket) - TOUTES LES REPOS
-        MASON_REPO_URL: ${MASON_REPO_URL:-https://github.com/ialame/mason.git}
-        PAINTER_REPO_URL: ${PAINTER_REPO_URL:-https://github.com/ialame/painter.git}
-        GESTIONCARTE_REPO_URL: ${GESTIONCARTE_REPO_URL:-https://github.com/ialame/gestioncarte.git}
-        MASON_BRANCH: ${MASON_BRANCH:-main}
-        PAINTER_BRANCH: ${PAINTER_BRANCH:-main}
-        GESTIONCARTE_BRANCH: ${GESTIONCARTE_BRANCH:-main}
-        GIT_TOKEN: ${GIT_TOKEN:-}
     container_name: cardmanager-gestioncarte
     ports:
       - "8080:8080"
     depends_on:
-      mariadb-standalone:
-        condition: service_healthy
       painter:
-        condition: service_started
-      mason:
         condition: service_started
     environment:
       - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb-standalone:3306/dev
@@ -106,14 +35,26 @@ services:
       - SPRING_DATASOURCE_PASSWORD=foufafou
       - SPRING_PROFILES_ACTIVE=docker
       - PAINTER_SERVICE_URL=http://painter:8081
-      - SPRING_LIQUIBASE_ENABLED=false
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - PAINTER_BASE_URL=http://painter:8081
+      - PAINTER_PUBLIC_URL=http://painter:8081
+    networks:
+      - cardmanager-network
+
+  # Serveur web statique pour servir les images
+  nginx-images:
+    image: nginx:alpine
+    container_name: cardmanager-images-server
+    ports:
+      - "8082:80"  # ← Port pour accéder aux images
+    volumes:
+      - cardmanager_images:/usr/share/nginx/html/images:ro  # ← Lecture seule
+      - ./nginx-images.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - painter
     networks:
       - cardmanager-network
 
 volumes:
-  cardmanager_db_data:
-    name: cardmanager_db_data
   cardmanager_images:
     name: cardmanager_images
 
