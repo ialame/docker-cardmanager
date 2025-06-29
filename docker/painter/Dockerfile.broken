@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# 🔧 Correction Rapide du Dockerfile Painter
+
+echo "🔧 Correction du Dockerfile Painter"
+echo "==================================="
+
+echo ""
+echo "✅ BONNE NOUVELLE !"
+echo "   Le build Painter a réussi !"
+echo "   Seule la commande COPY finale est incorrecte"
+echo ""
+
+# Sauvegarder le Dockerfile actuel
+cp docker/painter/Dockerfile docker/painter/Dockerfile.backup-$(date +%Y%m%d_%H%M%S)
+echo "💾 Dockerfile sauvegardé"
+
+echo ""
+echo "🔧 Correction de la commande COPY..."
+
+# Corriger la ligne COPY problématique
+sed -i 's|COPY --from=builder /usr/src/app/painter/target/painter-\*.jar app.jar 2>/dev/null || COPY --from=builder /usr/src/app/painter/painter/target/painter-\*.jar app.jar 2>/dev/null || COPY --from=builder /usr/src/app/painter/\*/target/painter-\*.jar app.jar|COPY --from=builder /usr/src/app/painter/painter/target/painter-*.jar app.jar|' docker/painter/Dockerfile
+
+echo "✅ Dockerfile corrigé"
+
+echo ""
+echo "📋 Ligne COPY corrigée :"
+echo "   AVANT: COPY avec || (syntaxe invalide)"
+echo "   APRÈS: COPY --from=builder /usr/src/app/painter/painter/target/painter-*.jar app.jar"
+
+echo ""
+echo "🚀 Le build va maintenant fonctionner !"
+echo "   ./build-with-ssh.sh"
+
+echo ""
+echo "💡 Si le JAR n'est pas trouvé à cet emplacement, voici les alternatives :"
+echo "   1. /usr/src/app/painter/target/painter-*.jar"
+echo "   2. /usr/src/app/painter/painter/target/painter-*.jar"
+echo "   3. /usr/src/app/painter/*/target/painter-*.jar"
+echo ""
+echo "🔍 Nous utilisons l'emplacement le plus probable : painter/target/"

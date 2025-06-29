@@ -1,3 +1,25 @@
+#!/bin/bash
+
+# 🔧 Correction Finale du Dockerfile Painter
+
+echo "🔧 Correction Finale du Dockerfile"
+echo "================================="
+
+echo ""
+echo "✅ BUILD MAVEN RÉUSSI !"
+echo "   Mason et Painter se sont compilés avec succès"
+echo "   Il reste juste à corriger la commande COPY"
+echo ""
+
+# Sauvegarder le Dockerfile actuel
+cp docker/painter/Dockerfile docker/painter/Dockerfile.broken
+echo "💾 Dockerfile cassé sauvegardé"
+
+echo ""
+echo "🔧 Création d'un Dockerfile avec COPY simple..."
+
+# Créer un nouveau Dockerfile avec la bonne syntaxe
+cat > docker/painter/Dockerfile << 'EOF'
 # 🎨 Dockerfile Painter - Version Finale Corrigée
 FROM maven:3.9.6-eclipse-temurin-21 AS builder
 WORKDIR /usr/src/app
@@ -231,3 +253,21 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Point d'entrée
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+EOF
+
+echo "✅ Nouveau Dockerfile créé avec syntaxe correcte"
+
+echo ""
+echo "🔍 Différences principales :"
+echo "   ❌ AVANT: COPY avec || (syntaxe invalide Docker)"
+echo "   ✅ APRÈS: COPY simple et direct"
+echo "   ✅ APRÈS: Diagnostic des JARs créés"
+echo "   ✅ APRÈS: Script git-clone simplifié"
+
+echo ""
+echo "🚀 Lancez maintenant le build :"
+echo "   ./build-with-ssh.sh"
+
+echo ""
+echo "💡 Si le JAR n'est pas trouvé, le script affichera tous les JARs"
+echo "   créés pour qu'on puisse ajuster le chemin COPY"

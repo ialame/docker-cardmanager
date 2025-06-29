@@ -47,7 +47,7 @@ SSHEOF
             echo "✅ Fichier .env créé pour SSH"
             echo ""
             echo "🔑 Votre clé publique (à ajouter sur Bitbucket) :"
-            cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null
+            cat ~/.ssh/bitbucket_ed25519.pub 2>/dev/null || cat ~/.ssh/bitbucket_ed25519.pub 2>/dev/null
             echo ""
             echo "📋 Ajoutez cette clé sur :"
             echo "   https://bitbucket.org/account/settings/ssh-keys/"
