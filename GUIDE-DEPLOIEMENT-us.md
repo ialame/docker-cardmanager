@@ -1,62 +1,62 @@
-# 🚀 Guide de Déploiement - CardManager
+# 🚀 Deployment Guide - CardManager
 
-## 📋 Vue d'ensemble
+## 📋 Overview
 
-CardManager est une application multi-services constituée de :
-- **GestionCarte** : Application web principale (port 8080)
-- **Painter** : Service de gestion d'images (port 8081)
-- **Mason** : Bibliothèque commune (services internes)
-- **MariaDB** : Base de données (configurable)
+CardManager is a multi-service application consisting of:
+- **GestionCarte** : Main web application (port 8080)
+- **Painter** : Image management service (port 8081)
+- **Mason** : Common library (internal services)
+- **MariaDB** : Database (configurable)
 
-## 🎯 Modes de déploiement
+## 🎯 Deployment Modes
 
-### 1. **Mode Développement** (base de données incluse)
-Pour tester/développer avec une base MariaDB conteneurisée
+### 1. **Development Mode** (included database)
+For testing/developing with a containerized MariaDB database
 
-### 2. **Mode Production** (base de données externe)
-Pour un déploiement avec votre propre base de données
+### 2. **Production Mode** (external database)
+For deployment with your own database
 
 ---
 
-## 🛠️ Prérequis
+## 🛠️ Prerequisites
 
-### Environnement requis
+### Required Environment
 - **Docker** >= 20.10
 - **Docker Compose** >= 2.0
-- **Git** (pour cloner les dépôts)
-- **Ports libres** : 8080, 8081, 3307 (développement)
+- **Git** (for cloning repositories)
+- **Free Ports** : 8080, 8081, 3307 (development)
 
-### Vérifications préalables
+### Pre-deployment Checks
 ```bash
-# Vérifier Docker
+# Check Docker
 docker --version
 docker-compose --version
 
-# Vérifier les ports libres
+# Check free ports
 netstat -tuln | grep -E "(8080|8081|3307)"
 ```
 
 ---
 
-## 🔧 Configuration Git
+## 🔧 Git Configuration
 
-### Option 1: Configuration automatique (recommandé)
+### Option 1: Automatic Configuration (recommended)
 ```bash
-# Lancer l'assistant de configuration
+# Launch configuration assistant
 chmod +x scripts/configure-git.sh
 ./scripts/configure-git.sh
 ```
 
-### Option 2: Configuration manuelle
+### Option 2: Manual Configuration
 ```bash
-# Copier le template
+# Copy template
 cp .env.template .env
 
-# Éditer avec vos valeurs
+# Edit with your values
 nano .env
 ```
 
-### Exemple de configuration
+### Configuration Example
 ```bash
 MASON_REPO_URL=https://github.com/ialame/mason
 PAINTER_REPO_URL=https://github.com/ialame/painter
@@ -69,55 +69,55 @@ GIT_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ---
 
-## 🚀 Déploiement Mode Développement
+## 🚀 Development Mode Deployment
 
-### Étape 1 : Configuration
+### Step 1: Configuration
 ```bash
-# Cloner le projet
-git clone <URL_DU_PROJET>
+# Clone project
+git clone <PROJECT_URL>
 cd cardmanager
 
-# Configuration Git
+# Git configuration
 chmod +x scripts/configure-git.sh
 ./scripts/configure-git.sh
 ```
 
-### Étape 2 : Démarrage
+### Step 2: Startup
 ```bash
-# Build et démarrage automatique
+# Automatic build and startup
 chmod +x build-quick-standalone.sh
 ./build-quick-standalone.sh
 
-# Ou démarrage manuel
+# Or manual startup
 docker-compose up -d
 ```
 
-### Étape 3 : Vérification
+### Step 3: Verification
 ```bash
-# Vérifier les services
+# Check services
 docker-compose ps
 
-# Tester les endpoints
+# Test endpoints
 curl http://localhost:8080/actuator/health
 curl http://localhost:8081/actuator/health
 ```
 
 ---
 
-## 🏭 Déploiement Mode Production
+## 🏭 Production Mode Deployment
 
-### 1. Configuration de production
+### 1. Production Configuration
 ```bash
-# Créer la configuration de production
+# Create production configuration
 cp .env.template .env.production
 
-# Éditer les variables sensibles
+# Edit sensitive variables
 nano .env.production
 ```
 
-### 2. Base de données externe
+### 2. External Database
 ```yaml
-# Créer docker-compose.override.yml
+# Create docker-compose.override.yml
 services:
   gestioncarte:
     environment:
@@ -131,15 +131,15 @@ services:
       - SPRING_DATASOURCE_USERNAME=${PROD_DB_USER}
       - SPRING_DATASOURCE_PASSWORD=${PROD_DB_PASSWORD}
 
-  # Retirer le service mariadb
+  # Remove mariadb service
   mariadb:
     deploy:
       replicas: 0
 ```
 
-### 3. Volumes de production
+### 3. Production Volumes
 ```yaml
-# Ajouter dans docker-compose.override.yml
+# Add to docker-compose.override.yml
 volumes:
   cardmanager_images:
     driver: local
@@ -153,77 +153,77 @@ volumes:
     name: prod_db_data
 ```
 
-### 4. Démarrage production
+### 4. Production Startup
 ```bash
-# Démarrage avec override
+# Startup with override
 docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d
 
-# Vérifier le déploiement
+# Verify deployment
 docker-compose ps
 ```
 
 ---
 
-## 🔍 Maintenance et Monitoring
+## 🔍 Maintenance and Monitoring
 
-### Commandes de maintenance
+### Maintenance Commands
 ```bash
-# Logs en temps réel
+# Real-time logs
 docker-compose logs -f
 
-# Redémarrage d'un service
+# Restart a service
 docker-compose restart gestioncarte
 
-# Mise à jour des images
+# Update images
 docker-compose pull
 docker-compose up -d
 
-# Sauvegarde des données
+# Data backup
 ./export-data.sh
 ```
 
 ### Monitoring
 ```bash
-# Métriques système
+# System metrics
 docker stats
 
 # Health checks
 curl http://localhost:8080/actuator/health
 curl http://localhost:8081/actuator/health
 
-# Espace disque des volumes
+# Volume disk space
 docker system df
 ```
 
 ---
 
-## 🐛 Dépannage
+## 🐛 Troubleshooting
 
-### Problèmes Git
+### Git Issues
 ```bash
-# Vérifier l'accès aux repos
+# Check repository access
 git ls-remote $MASON_REPO_URL
 
-# Problème de token
-echo $GIT_TOKEN | cut -c1-10  # Vérifier le début du token
+# Token issue
+echo $GIT_TOKEN | cut -c1-10  # Check token beginning
 ```
 
-### Problèmes de base de données
+### Database Issues
 ```bash
-# Connexion directe
+# Direct connection
 docker-compose exec mariadb mysql -u ia -p
 
-# Réinitialiser la base
+# Reset database
 docker-compose down --volumes
 docker-compose up -d
 ```
 
-### Problèmes de performance
+### Performance Issues
 ```bash
-# Vérifier la mémoire
+# Check memory
 docker stats --no-stream
 
-# Optimiser les images
+# Optimize images
 docker image prune -f
 docker volume prune -f
 ```
@@ -232,23 +232,23 @@ docker volume prune -f
 
 ## 📞 Support
 
-### Logs à fournir en cas de problème
+### Logs to provide in case of issues
 ```bash
-# Collecter tous les logs
+# Collect all logs
 docker-compose logs > cardmanager-logs.txt
 
-# Configuration anonymisée
+# Anonymized configuration
 docker-compose config > cardmanager-config.yml
 ```
 
-### Informations système
+### System Information
 ```bash
-# Version Docker
+# Docker version
 docker --version
 docker-compose --version
 
-# Espace disque
+# Disk space
 df -h
 ```
 
-**🎯 Pour toute question technique, joindre ces informations !**
+**🎯 For any technical questions, please include this information!**
