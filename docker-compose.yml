@@ -1,11 +1,11 @@
 services:
-  # 🗄️ Base de données MariaDB Personnalisée
+  # 🗄️ Base de données MariaDB personnalisée
   mariadb:
     image: cardmanager-mariadb:latest
     container_name: cardmanager-mariadb
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-foufafou}
       MYSQL_DATABASE: ${DB_NAME:-dev}
       MYSQL_USER: ${DB_USER:-ia}
       MYSQL_PASSWORD: ${DB_PASSWORD:-foufafou}
@@ -14,11 +14,13 @@ services:
     volumes:
       - ./volumes/db_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${DB_USER:-ia}", "-p${DB_PASSWORD:-foufafou}"]
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-pfoufafou"]
+      interval: 30s
       timeout: 10s
-      retries: 10
-      interval: 10s
-      start_period: 60s
+      start_period: 60s  # Plus de temps pour l'initialisation
+      retries: 5
+    networks:
+      - cardmanager-network
 
   # 🎨 Service Painter (Images)
   painter:
@@ -30,8 +32,8 @@ services:
         PAINTER_REPO_URL: ${PAINTER_REPO_URL}
         MASON_BRANCH: ${MASON_BRANCH}
         PAINTER_BRANCH: ${PAINTER_BRANCH}
-        SSH_PRIVATE_KEY: ${SSH_PRIVATE_KEY}
         GIT_TOKEN: ${GIT_TOKEN}
+        SSH_PRIVATE_KEY: ${SSH_PRIVATE_KEY}
     container_name: cardmanager-painter
     restart: unless-stopped
     ports:
@@ -48,11 +50,13 @@ services:
       mariadb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-s", "http://localhost:8081/"]
-      timeout: 5s
-      retries: 3
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
       interval: 30s
-      start_period: 60s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+    networks:
+      - cardmanager-network
 
   # 🖼️ Service GestionCarte (Application principale)
   gestioncarte:
@@ -61,13 +65,11 @@ services:
       dockerfile: docker/gestioncarte/Dockerfile
       args:
         MASON_REPO_URL: ${MASON_REPO_URL}
-        PAINTER_REPO_URL: ${PAINTER_REPO_URL}
         GESTIONCARTE_REPO_URL: ${GESTIONCARTE_REPO_URL}
         MASON_BRANCH: ${MASON_BRANCH}
-        PAINTER_BRANCH: ${PAINTER_BRANCH}
         GESTIONCARTE_BRANCH: ${GESTIONCARTE_BRANCH}
-        SSH_PRIVATE_KEY: ${SSH_PRIVATE_KEY}
         GIT_TOKEN: ${GIT_TOKEN}
+        SSH_PRIVATE_KEY: ${SSH_PRIVATE_KEY}
     container_name: cardmanager-gestioncarte
     restart: unless-stopped
     ports:
@@ -84,33 +86,36 @@ services:
       painter:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-s", "http://localhost:8080/"]
-      timeout: 5s
-      retries: 3
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
       interval: 30s
-      start_period: 120s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    networks:
+      - cardmanager-network
 
-  # ⚡ Nginx (Serveur d'images statiques)
+  # 🌐 Nginx (Reverse Proxy)
   nginx:
     image: nginx:alpine
     container_name: cardmanager-nginx
     restart: unless-stopped
     ports:
-      - "${NGINX_PORT:-8082}:80"
+      - "80:80"
     volumes:
-      - ./volumes/images:/var/www/html/images:ro
       - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./volumes/images:/var/www/images:ro
     depends_on:
-      - painter
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
-      timeout: 5s
-      retries: 3
-      interval: 30s
+      gestioncarte:
+        condition: service_healthy
+      painter:
+        condition: service_healthy
+    networks:
+      - cardmanager-network
 
-# 💾 Volumes persistants
 volumes:
   db_data:
-    driver: local
   images:
-    driver: local
+
+networks:
+  cardmanager-network:
+    driver: bridge
