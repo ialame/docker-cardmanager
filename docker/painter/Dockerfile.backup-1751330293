@@ -1,0 +1,117 @@
+# =============================================================================
+# Dockerfile Painter - VERSION CORRIGÉE
+# Build multi-stage pour Painter avec dépendances GitHub
+# =============================================================================
+
+FROM maven:3.9.6-eclipse-temurin-21 as builder
+LABEL maintainer="ibrahim.alame@gmail.com"
+
+# Arguments de build GitHub
+ARG MASON_REPO_URL=https://github.com/ialame/mason.git
+ARG PAINTER_REPO_URL=https://github.com/ialame/painter.git
+ARG MASON_BRANCH=main
+ARG PAINTER_BRANCH=main
+
+# Installer Git et SSH
+RUN apt-get update && apt-get install -y \
+    git \
+    openssh-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configuration Git globale
+RUN git config --global user.name "Docker Builder" && \
+    git config --global user.email "builder@docker.com"
+
+# Répertoire de travail
+WORKDIR /usr/src/app
+
+# Créer script de clone intelligent
+RUN echo '#!/bin/bash' > /usr/local/bin/git-clone-smart.sh && \
+    echo 'REPO_URL=$1' >> /usr/local/bin/git-clone-smart.sh && \
+    echo 'DIR_NAME=$2' >> /usr/local/bin/git-clone-smart.sh && \
+    echo 'BRANCH=${3:-main}' >> /usr/local/bin/git-clone-smart.sh && \
+    echo 'echo "🔄 Clonage de $DIR_NAME depuis $REPO_URL (branche: $BRANCH)..."' >> /usr/local/bin/git-clone-smart.sh && \
+    echo 'git clone --depth 1 -b "$BRANCH" "$REPO_URL" "$DIR_NAME" || {' >> /usr/local/bin/git-clone-smart.sh && \
+    echo '    echo "❌ Échec clone avec branche $BRANCH, essai avec main..."' >> /usr/local/bin/git-clone-smart.sh && \
+    echo '    git clone --depth 1 -b main "$REPO_URL" "$DIR_NAME" || {' >> /usr/local/bin/git-clone-smart.sh && \
+    echo '        echo "❌ Échec clone avec main, essai sans spécifier de branche..."' >> /usr/local/bin/git-clone-smart.sh && \
+    echo '        git clone --depth 1 "$REPO_URL" "$DIR_NAME"' >> /usr/local/bin/git-clone-smart.sh && \
+    echo '    }' >> /usr/local/bin/git-clone-smart.sh && \
+    echo '}' >> /usr/local/bin/git-clone-smart.sh && \
+    echo 'echo "✅ $DIR_NAME cloné avec succès"' >> /usr/local/bin/git-clone-smart.sh && \
+    chmod +x /usr/local/bin/git-clone-smart.sh
+
+# Créer script de build Maven avec retry
+RUN echo '#!/bin/bash' > /usr/local/bin/maven-build-retry.sh && \
+    echo 'PROJECT_NAME=$1' >> /usr/local/bin/maven-build-retry.sh && \
+    echo 'MAVEN_CMD=$2' >> /usr/local/bin/maven-build-retry.sh && \
+    echo 'MAX_ATTEMPTS=3' >> /usr/local/bin/maven-build-retry.sh && \
+    echo 'for attempt in $(seq 1 $MAX_ATTEMPTS); do' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '    echo "🔨 Tentative $attempt/$MAX_ATTEMPTS: Build de $PROJECT_NAME..."' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '    if eval "$MAVEN_CMD"; then' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '        echo "✅ Build de $PROJECT_NAME réussi à la tentative $attempt"' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '        exit 0' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '    else' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '        echo "❌ Échec build $PROJECT_NAME (tentative $attempt/$MAX_ATTEMPTS)"' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '        if [ $attempt -lt $MAX_ATTEMPTS ]; then' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '            echo "⏳ Attente 5s avant nouvelle tentative..."' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '            sleep 5' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '        fi' >> /usr/local/bin/maven-build-retry.sh && \
+    echo '    fi' >> /usr/local/bin/maven-build-retry.sh && \
+    echo 'done' >> /usr/local/bin/maven-build-retry.sh && \
+    echo 'echo "💥 Échec définitif du build de $PROJECT_NAME après $MAX_ATTEMPTS tentatives"' >> /usr/local/bin/maven-build-retry.sh && \
+    echo 'exit 1' >> /usr/local/bin/maven-build-retry.sh && \
+    chmod +x /usr/local/bin/maven-build-retry.sh
+
+# Cloner les projets dans l'ordre correct
+RUN /usr/local/bin/git-clone-smart.sh "$MASON_REPO_URL" mason "$MASON_BRANCH"
+RUN /usr/local/bin/git-clone-smart.sh "$PAINTER_REPO_URL" painter "$PAINTER_BRANCH"
+
+# 1. Construire MASON en premier (requis pour Painter)
+WORKDIR /usr/src/app/mason
+RUN /usr/local/bin/maven-build-retry.sh "Mason" "mvn clean install -DskipTests -Dmaven.test.skip=true -B"
+
+# Vérifier que Mason est bien installé dans le repository local
+RUN echo "🔍 Vérification Mason installé:" && \
+    ls -la ~/.m2/repository/com/pcagrade/mason/ && \
+    echo "✅ Mason disponible pour Painter"
+
+# 2. Construire PAINTER (dépend de Mason)
+WORKDIR /usr/src/app/painter
+RUN /usr/local/bin/maven-build-retry.sh "Painter" "mvn clean package -DskipTests -Dmaven.test.skip=true -B"
+
+# Diagnostique final - vérifier que le JAR Painter est bien créé
+RUN echo "📦 JAR Painter trouvé:" && \
+    find /usr/src/app/painter -name "*.jar" -type f | head -5
+
+# =============================================================================
+# Stage de production
+# =============================================================================
+FROM eclipse-temurin:21-jre-alpine
+LABEL maintainer="ibrahim.alame@gmail.com"
+WORKDIR /app
+
+# Créer répertoire pour les images
+RUN mkdir -p /app/images
+
+# Installer curl pour health checks
+RUN apk add --no-cache curl wget && \
+    echo "✅ Runtime configuré avec curl et wget"
+
+# Copier le JAR Painter
+COPY --from=builder /usr/src/app/painter/target/painter-*.jar ./app.jar
+
+# Port d'exposition
+EXPOSE 8081
+
+# Variables d'environnement
+ENV SPRING_PROFILES_ACTIVE=docker
+ENV SERVER_PORT=8081
+
+# Health check corrigé (utilise le bon endpoint)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8081/ || exit 1
+
+# Point d'entrée
+ENTRYPOINT ["java", "-jar", "app.jar"]

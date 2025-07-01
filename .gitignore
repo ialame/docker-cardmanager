@@ -44,4 +44,6 @@ docker-compose.yml.backup
 docker-compose-WORKING-BACKUP.yml
 .backup-20250627
 .backup-20250629_094645
+initdb/
+volumes/
 
