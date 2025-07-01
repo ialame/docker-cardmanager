@@ -1,0 +1,7 @@
+Painter est un projet multi-modules avec une structure complexe :
+
+painter-parent (POM parent)
+
+painter-common (contient les DTOs et interfaces)
+painter-client (client library)
+painter (application principale)
